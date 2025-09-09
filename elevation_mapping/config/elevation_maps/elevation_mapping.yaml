@@ -21,7 +21,7 @@ elevation_mapping:
       step_window_m:  0.25
       slope_long_max_rad: 0.35   # ~20°
       slope_lat_max_rad:  0.35
-      step_max_m:         0.05   # no sube escalones
+      step_max_m:         40.05   # no sube escalones
 
       cvar_alpha:     0.90
       cvar_window_m:  0.50

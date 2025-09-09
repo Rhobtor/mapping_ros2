@@ -1,1374 +1,3 @@
-
-// // #include "elevation_mapping/layer_tools.hpp"
-// // #include <grid_map_core/iterators/GridMapIterator.hpp>
-// // #include <cmath>
-// // #include <algorithm>
-// // #include <vector>
-// // #include <limits>
-
-// // using grid_map::Index;
-// // using grid_map::Matrix;
-
-// // namespace {
-
-// // // --- utilidades ---
-// // inline bool isFiniteF(float v) { return std::isfinite(static_cast<double>(v)); }
-
-// // inline float NaNf() { return std::numeric_limits<float>::quiet_NaN(); }
-
-// // inline int metersToCells(const grid_map::GridMap& map, double m)
-// // {
-// //   const double res = map.getResolution();
-// //   int cells = static_cast<int>(std::round(m / std::max(1e-9, res)));
-// //   return std::max(1, cells);
-// // }
-
-// // inline bool insideIndex(const grid_map::GridMap& map, const Index& i)
-// // {
-// //   const auto& sz = map.getSize();
-// //   return (i(0) >= 0 && i(1) >= 0 && i(0) < sz(0) && i(1) < sz(1));
-// // }
-
-// // } // anon
-
-// // // --------------------------- SLOPE (rad) ---------------------------
-// // void em::layers::addSlope(grid_map::GridMap& map, double h)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix slope(Z.rows(), Z.cols());
-// //   const double dx = std::max(1e-9, h);
-// //   const double dy = std::max(1e-9, h);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float zc = Z(idx(0), idx(1));
-// //     if (!isFiniteF(zc)) { slope(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     Index nx = idx; nx(0)++;  Index px = idx; px(0)--;
-// //     Index ny = idx; ny(1)++;  Index py = idx; py(1)--;
-
-// //     auto val = [&](const Index& i)->float {
-// //       if (!insideIndex(map, i)) return zc;
-// //       const float v = Z(i(0), i(1));
-// //       return isFiniteF(v) ? v : zc;
-// //     };
-
-// //     const double dzdx = (val(nx) - val(px)) / (2.0 * dx);
-// //     const double dzdy = (val(ny) - val(py)) / (2.0 * dy);
-// //     const double grad = std::hypot(dzdx, dzdy);
-
-// //     slope(idx(0), idx(1)) = static_cast<float>(std::atan(grad)); // rad
-// //   }
-// //   if (map.exists("slope")) map["slope"] = slope;
-// //   else map.add("slope", slope);
-// // }
-
-// // // --------------------------- ROUGHNESS (m) ---------------------------
-// // void em::layers::addRoughness(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix R(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { R(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0, sum2=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; sum2 += double(z)*double(z); ++n;
-// //       }
-// //     }
-// //     if (n<3) { R(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     const double var  = std::max(0.0, (sum2 / n) - mean*mean);
-// //     R(c(0), c(1)) = static_cast<float>(std::sqrt(var));
-// //   }
-// //   if (map.exists("roughness")) map["roughness"] = R;
-// //   else map.add("roughness", R);
-// // }
-
-// // // --------------------------- STEP (m) ---------------------------
-// // void em::layers::addStep(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix S(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { S(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         if (di==0 && dj==0) continue;
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; ++n;
-// //       }
-// //     }
-// //     if (n<3) { S(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     S(c(0), c(1)) = static_cast<float>(std::fabs(double(zc) - mean));
-// //   }
-// //   if (map.exists("step")) map["step"] = S;
-// //   else map.add("step", S);
-// // }
-
-// // // --------------------------- OBSTÁCULOS (0/1) ---------------------------
-// // void em::layers::addObstacleBinaryFromGeom(grid_map::GridMap& map,
-// //                                            double slope_thresh_rad,
-// //                                            double step_thresh_m)
-// // {
-// //   if (!map.exists("slope") || !map.exists("step")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& H = map["step"];
-// //   Matrix O(S.rows(), S.cols());
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float h = H(idx(0), idx(1));
-// //     const bool s_bad = isFiniteF(s) && s >= slope_thresh_rad;
-// //     const bool h_bad = isFiniteF(h) && h >= step_thresh_m;
-// //     O(idx(0), idx(1)) = (s_bad || h_bad) ? 1.0f : 0.0f;
-// //   }
-// //   if (map.exists("obstacles")) map["obstacles"] = O;
-// //   else map.add("obstacles", O);
-// // }
-
-// // // --------------------------- TRAVERSABILIDAD [0..1] ---------------------------
-// // void em::layers::addTraversabilityFromSlopeRough(grid_map::GridMap& map,
-// //                                                  double slope_max_rad,
-// //                                                  double rough_max_m,
-// //                                                  double w_slope,
-// //                                                  double w_rough)
-// // {
-// //   if (!map.exists("slope") || !map.exists("roughness")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& R = map["roughness"];
-// //   Matrix T(S.rows(), S.cols());
-
-// //   const double ws = std::clamp(w_slope, 0.0, 1.0);
-// //   const double wr = std::clamp(w_rough, 0.0, 1.0);
-// //   const double wsum = std::max(1e-6, ws + wr);
-// //   const double smax = std::max(1e-6, slope_max_rad);
-// //   const double rmax = std::max(1e-6, rough_max_m);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float r = R(idx(0), idx(1));
-// //     if (!isFiniteF(s) || !isFiniteF(r)) { T(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     const double ns = 1.0 - std::clamp(double(s)/smax, 0.0, 1.0);
-// //     const double nr = 1.0 - std::clamp(double(r)/rmax, 0.0, 1.0);
-// //     const double t  = (ws*ns + wr*nr) / wsum;
-
-// //     T(idx(0), idx(1)) = static_cast<float>(std::clamp(t, 0.0, 1.0));
-// //   }
-// //   if (map.exists("trav")) map["trav"] = T;
-// //   else map.add("trav", T);
-// // }
-
-// // // --------------------------- CVaR TRAV ---------------------------
-// // void em::layers::addCvarTraversability(grid_map::GridMap& map,
-// //                                        double alpha,
-// //                                        double window_m)
-// // {
-// //   if (!map.exists("trav")) return;
-// //   const Matrix& TR = map["trav"];
-// //   Matrix CV(TR.rows(), TR.cols());
-
-// //   const int win  = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-// //   const double a = std::clamp(alpha, 0.0, 0.999);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float tc = TR(c(0), c(1));
-// //     if (!isFiniteF(tc)) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::vector<double> risks;
-// //     risks.reserve((2*half+1)*(2*half+1));
-
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float t = TR(p(0), p(1));
-// //         if (!isFiniteF(t)) continue;
-// //         risks.push_back(1.0 - double(t)); // riesgo = 1 - trav
-// //       }
-// //     }
-// //     if (risks.size() < 5) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::sort(risks.begin(), risks.end()); // asc
-// //     const size_t n = risks.size();
-// //     const size_t q = std::min(n-1, static_cast<size_t>(std::ceil(a * (n - 1))));
-// //     const double thresh = risks[q];
-
-// //     double sumTail=0.0; size_t m=0;
-// //     for (size_t k=q; k<n; ++k) { sumTail += risks[k]; ++m; }
-// //     const double cvar_risk = (m>0) ? (sumTail / double(m)) : thresh;
-
-// //     const double cvar_trav = std::clamp(1.0 - cvar_risk, 0.0, 1.0);
-// //     CV(c(0), c(1)) = static_cast<float>(cvar_trav);
-// //   }
-// //   if (map.exists("cvar_trav")) map["cvar_trav"] = CV;
-// //   else map.add("cvar_trav", CV);
-// // }
-
-// // // --------------------------- NEGATIVE OBSTACLES (0/1) ---------------------------
-// // void addNegativeObstaclesRobust(grid_map::GridMap& map,
-// //                                 double drop_thresh_m,
-// //                                 double ring_m,
-// //                                 double /*min_valid_ratio*/,
-// //                                 double /*slope_gate_rad*/,
-// //                                 const std::string& /*elevation_layer*/,
-// //                                 const std::string& /*slope_layer*/,
-// //                                 const std::string& out_layer)
-// // {
-// //   // Reutiliza tu versión corta existente (3 args), que crea/llena "negatives".
-// //   em::layers::addNegativeObstacles(map, drop_thresh_m, ring_m);
-
-// //   const std::string src = "negatives";
-// //   if (!map.exists(src)) return;
-
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   map[out_layer] = map[src];
-// // }
-
-// // void combineToFinalObstacles(grid_map::GridMap& map,
-// //                              const std::string& obstacles_layer,
-// //                              const std::string& negatives_layer,
-// //                              const std::string& cvar_layer,
-// //                              double cvar_tau,
-// //                              const std::string& out_layer)
-// // {
-// //   const bool have_obst = map.exists(obstacles_layer);
-// //   const bool have_neg  = map.exists(negatives_layer);
-// //   const bool have_cvar = map.exists(cvar_layer);
-
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   auto& outM = map[out_layer];
-
-// //   const int nx = map.getSize()(0);
-// //   const int ny = map.getSize()(1);
-
-// //   const grid_map::Matrix* obst = have_obst ? &map[obstacles_layer] : nullptr;
-// //   const grid_map::Matrix* neg  = have_neg  ? &map[negatives_layer]  : nullptr;
-// //   const grid_map::Matrix* cvar = have_cvar ? &map[cvar_layer]       : nullptr;
-
-// //   outM.setZero(nx, ny);
-
-// //   for (int i = 0; i < nx; ++i) {
-// //     for (int j = 0; j < ny; ++j) {
-// //       float v = 0.0f;
-// //       if (obst) v = std::max(v, (*obst)(i,j));
-// //       if (neg)  v = std::max(v, (*neg)(i,j));
-// //       if (cvar) {
-// //         const float gate = ((*cvar)(i,j) > static_cast<float>(cvar_tau)) ? 1.0f : 0.0f;
-// //         v = std::max(v, gate);
-// //       }
-// //       outM(i,j) = v;
-// //     }
-// //   }
-// // }
-
-// // #include "elevation_mapping/layer_tools.hpp"
-// // #include <grid_map_core/iterators/GridMapIterator.hpp>
-// // #include <cmath>
-// // #include <algorithm>
-// // #include <vector>
-// // #include <limits>
-
-// // using grid_map::Index;
-// // using grid_map::Matrix;
-
-// // namespace {  // Utilidades internas
-
-// // inline bool isFiniteF(float v) { return std::isfinite(static_cast<double>(v)); }
-
-// // inline float NaNf() { return std::numeric_limits<float>::quiet_NaN(); }
-
-// // inline int metersToCells(const grid_map::GridMap& map, double m)
-// // {
-// //   const double res = map.getResolution();
-// //   int cells = static_cast<int>(std::round(m / std::max(1e-9, res)));
-// //   return std::max(1, cells);
-// // }
-
-// // inline bool insideIndex(const grid_map::GridMap& map, const Index& i)
-// // {
-// //   const auto& sz = map.getSize();
-// //   return (i(0) >= 0 && i(1) >= 0 && i(0) < sz(0) && i(1) < sz(1));
-// // }
-
-// // } // anon
-
-// // // ============================================================================
-// // // ===============================  em::layers  ================================
-// // // ============================================================================
-
-// // namespace em::layers {
-
-// // // --------------------------- SLOPE (rad) ---------------------------
-// // void addSlope(grid_map::GridMap& map, double h)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix slope(Z.rows(), Z.cols());
-// //   const double dx = std::max(1e-9, h);
-// //   const double dy = std::max(1e-9, h);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float zc = Z(idx(0), idx(1));
-// //     if (!isFiniteF(zc)) { slope(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     Index nx = idx; nx(0)++;  Index px = idx; px(0)--;
-// //     Index ny = idx; ny(1)++;  Index py = idx; py(1)--;
-
-// //     auto val = [&](const Index& i)->float {
-// //       if (!insideIndex(map, i)) return zc;
-// //       const float v = Z(i(0), i(1));
-// //       return isFiniteF(v) ? v : zc;
-// //     };
-
-// //     const double dzdx = (val(nx) - val(px)) / (2.0 * dx);
-// //     const double dzdy = (val(ny) - val(py)) / (2.0 * dy);
-// //     const double grad = std::hypot(dzdx, dzdy);
-
-// //     slope(idx(0), idx(1)) = static_cast<float>(std::atan(grad)); // rad
-// //   }
-// //   if (map.exists("slope")) map["slope"] = slope;
-// //   else map.add("slope", slope);
-// // }
-
-// // // --------------------------- ROUGHNESS (m) ---------------------------
-// // void addRoughness(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix R(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { R(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0, sum2=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; sum2 += double(z)*double(z); ++n;
-// //       }
-// //     }
-// //     if (n<3) { R(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     const double var  = std::max(0.0, (sum2 / n) - mean*mean);
-// //     R(c(0), c(1)) = static_cast<float>(std::sqrt(var));
-// //   }
-// //   if (map.exists("roughness")) map["roughness"] = R;
-// //   else map.add("roughness", R);
-// // }
-
-// // // --------------------------- STEP (m) ---------------------------
-// // void addStep(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix S(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { S(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         if (di==0 && dj==0) continue;
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; ++n;
-// //       }
-// //     }
-// //     if (n<3) { S(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     S(c(0), c(1)) = static_cast<float>(std::fabs(double(zc) - mean));
-// //   }
-// //   if (map.exists("step")) map["step"] = S;
-// //   else map.add("step", S);
-// // }
-
-// // // --------------------------- OBSTÁCULOS (0/1) ---------------------------
-// // void addObstacleBinaryFromGeom(grid_map::GridMap& map,
-// //                                double slope_thresh_rad,
-// //                                double step_thresh_m)
-// // {
-// //   if (!map.exists("slope") || !map.exists("step")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& H = map["step"];
-// //   Matrix O(S.rows(), S.cols());
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float h = H(idx(0), idx(1));
-// //     const bool s_bad = isFiniteF(s) && s >= slope_thresh_rad;
-// //     const bool h_bad = isFiniteF(h) && h >= step_thresh_m;
-// //     O(idx(0), idx(1)) = (s_bad || h_bad) ? 1.0f : 0.0f;
-// //   }
-// //   if (map.exists("obstacles")) map["obstacles"] = O;
-// //   else map.add("obstacles", O);
-// // }
-
-// // // --------------------------- TRAVERSABILIDAD [0..1] ---------------------------
-// // void addTraversabilityFromSlopeRough(grid_map::GridMap& map,
-// //                                      double slope_max_rad,
-// //                                      double rough_max_m,
-// //                                      double w_slope,
-// //                                      double w_rough)
-// // {
-// //   if (!map.exists("slope") || !map.exists("roughness")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& R = map["roughness"];
-// //   Matrix T(S.rows(), S.cols());
-
-// //   const double ws = std::clamp(w_slope, 0.0, 1.0);
-// //   const double wr = std::clamp(w_rough, 0.0, 1.0);
-// //   const double wsum = std::max(1e-6, ws + wr);
-// //   const double smax = std::max(1e-6, slope_max_rad);
-// //   const double rmax = std::max(1e-6, rough_max_m);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float r = R(idx(0), idx(1));
-// //     if (!isFiniteF(s) || !isFiniteF(r)) { T(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     const double ns = 1.0 - std::clamp(double(s)/smax, 0.0, 1.0);
-// //     const double nr = 1.0 - std::clamp(double(r)/rmax, 0.0, 1.0);
-// //     const double t  = (ws*ns + wr*nr) / wsum;
-
-// //     T(idx(0), idx(1)) = static_cast<float>(std::clamp(t, 0.0, 1.0));
-// //   }
-// //   if (map.exists("trav")) map["trav"] = T;
-// //   else map.add("trav", T);
-// // }
-
-// // // --------------------------- CVaR TRAV + RISK ---------------------------
-// // void addCvarTraversability(grid_map::GridMap& map,
-// //                            double alpha,
-// //                            double window_m)
-// // {
-// //   if (!map.exists("trav")) return;
-// //   const Matrix& TR = map["trav"];
-// //   Matrix CV(TR.rows(), TR.cols());
-
-// //   const int win  = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-// //   const double a = std::clamp(alpha, 0.0, 0.999);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float tc = TR(c(0), c(1));
-// //     if (!isFiniteF(tc)) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::vector<double> risks;
-// //     risks.reserve((2*half+1)*(2*half+1));
-
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float t = TR(p(0), p(1));
-// //         if (!isFiniteF(t)) continue;
-// //         risks.push_back(1.0 - double(t)); // riesgo = 1 - trav
-// //       }
-// //     }
-// //     if (risks.size() < 5) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::sort(risks.begin(), risks.end()); // asc
-// //     const size_t n = risks.size();
-// //     const size_t q = std::min(n-1, static_cast<size_t>(std::ceil(a * (n - 1))));
-// //     const double thresh = risks[q];
-
-// //     double sumTail=0.0; size_t m=0;
-// //     for (size_t k=q; k<n; ++k) { sumTail += risks[k]; ++m; }
-// //     const double cvar_risk = (m>0) ? (sumTail / double(m)) : thresh;
-
-// //     const double cvar_trav = std::clamp(1.0 - cvar_risk, 0.0, 1.0);
-// //     CV(c(0), c(1)) = static_cast<float>(cvar_trav);
-// //   }
-
-// //   // Guarda ambas capas para compatibilidad con tu fusión:
-// //   //  - "cvar_trav": alto = bueno
-// //   //  - "cvar_risk": alto = malo = 1 - cvar_trav
-// //   // if (map.exists("cvar_trav")) map["cvar_trav"] = CV;
-// //   // else map.add("cvar_trav", CV);
-// //   if (map.exists("cvar_risk")) map["cvar_risk"] = CV;
-// //   else map.add("cvar_risk", CV);
-// //   Matrix RISK = Matrix::Constant(CV.rows(), CV.cols(), NaNf());
-// //   for (int i=0; i<CV.rows(); ++i) {
-// //     for (int j=0; j<CV.cols(); ++j) {
-// //       const float v = CV(i,j);
-// //       RISK(i,j) = isFiniteF(v) ? (1.0f - v) : NaNf();
-// //     }
-// //   }
-// //   if (map.exists("cvar_risk")) map["cvar_risk"] = RISK;
-// //   else map.add("cvar_risk", RISK);
-// // }
-
-// // // --------------------------- NEGATIVE OBSTACLES (3 args) ---------------------------
-// // void addNegativeObstacles(grid_map::GridMap& map,
-// //                           double drop_thresh_m,
-// //                           double ring_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix NEG(Z.rows(), Z.cols());
-// //   NEG.setZero();
-
-// //   const int ring = metersToCells(map, ring_m);
-// //   const int rin  = std::max(1, ring / 2);
-// //   const int rout = std::max(rin + 1, ring);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { NEG(c(0), c(1)) = 0.0f; continue; }
-
-// //     double sum = 0.0; int n = 0;
-// //     for (int di = -rout; di <= rout; ++di) {
-// //       for (int dj = -rout; dj <= rout; ++dj) {
-// //         const int rmax = std::max(std::abs(di), std::abs(dj));
-// //         if (rmax < rin || rmax > rout) continue;   // anillo [rin, rout]
-// //         Index p(c(0) + di, c(1) + dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; ++n;
-// //       }
-// //     }
-// //     if (n < 3) { NEG(c(0), c(1)) = 0.0f; continue; }
-
-// //     const double mean_ring = sum / double(n);
-// //     NEG(c(0), c(1)) = (mean_ring - double(zc) >= drop_thresh_m) ? 1.0f : 0.0f;
-// //   }
-
-// //   if (map.exists("negatives")) map["negatives"] = NEG;
-// //   else map.add("negatives", NEG);
-// // }
-
-// // // --------------------------- NEGATIVE OBSTACLES (8 args) ---------------------------
-// // void addNegativeObstaclesRobust(grid_map::GridMap& map,
-// //                                 double drop_thresh_m,
-// //                                 double ring_m,
-// //                                 double /*min_valid_ratio*/,
-// //                                 double /*slope_gate_rad*/,
-// //                                 const std::string& /*elevation_layer*/,
-// //                                 const std::string& /*slope_layer*/,
-// //                                 const std::string& out_layer)
-// // {
-// //   // Para empezar: reutiliza la versión corta que escribe "negatives".
-// //   em::layers::addNegativeObstacles(map, drop_thresh_m, ring_m);
-
-// //   const std::string src = "negatives";
-// //   if (!map.exists(src)) return;
-
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   map[out_layer] = map[src];
-// // }
-
-// // // --------------------------- COMBINAR A CAPA FINAL ---------------------------
-// // void combineToFinalObstacles(grid_map::GridMap& map,
-// //                              const std::string& obstacles_layer,
-// //                              const std::string& negatives_layer,
-// //                              const std::string& cvar_layer,
-// //                              double cvar_tau,
-// //                              const std::string& out_layer)
-// // {
-// //   const bool have_obst = map.exists(obstacles_layer);
-// //   const bool have_neg  = map.exists(negatives_layer);
-// //   const bool have_cvar = map.exists(cvar_layer);
-
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   auto& outM = map[out_layer];
-
-// //   const int nx = map.getSize()(0);
-// //   const int ny = map.getSize()(1);
-// //   outM.setZero(nx, ny);
-
-// //   const grid_map::Matrix* obst = have_obst ? &map[obstacles_layer] : nullptr;
-// //   const grid_map::Matrix* neg  = have_neg  ? &map[negatives_layer]  : nullptr;
-// //   const grid_map::Matrix* cvar = have_cvar ? &map[cvar_layer]       : nullptr;
-
-// //   for (int i = 0; i < nx; ++i) {
-// //     for (int j = 0; j < ny; ++j) {
-// //       float v = 0.0f;
-// //       if (obst) v = std::max(v, (*obst)(i, j));
-// //       if (neg)  v = std::max(v, (*neg)(i, j));
-// //       if (cvar) {
-// //         // Aquí asumimos cvar_layer == "cvar_risk" (alto = malo)
-// //         const float gate = ((*cvar)(i, j) > static_cast<float>(cvar_tau)) ? 1.0f : 0.0f;
-// //         v = std::max(v, gate);
-// //       }
-// //       outM(i, j) = v;
-// //     }
-// //   }
-// // }
-
-// // } // namespace em::layers
-
-// /////
-// #include "elevation_mapping/layer_tools.hpp"
-
-// #include <grid_map_core/iterators/GridMapIterator.hpp>
-// #include <grid_map_core/GridMap.hpp>
-
-// #include <cmath>
-// #include <algorithm>
-// #include <vector>
-// #include <limits>
-// #include <numeric>
-
-// using grid_map::Index;
-// using grid_map::Matrix;
-
-// namespace { // utilidades internas
-
-// inline bool isFiniteF(float v) { return std::isfinite(static_cast<double>(v)); }
-// inline float NaNf() { return std::numeric_limits<float>::quiet_NaN(); }
-
-// inline bool insideIndex(const grid_map::GridMap& map, const Index& i)
-// {
-//   const auto& sz = map.getSize();
-//   return (i(0) >= 0 && i(1) >= 0 && i(0) < sz(0) && i(1) < sz(1));
-// }
-
-// inline int metersToCells(const grid_map::GridMap& map, double m)
-// {
-//   const double res = std::max(1e-9, map.getResolution());
-//   int cells = static_cast<int>(std::round(m / res));
-//   return std::max(1, cells);
-// }
-
-// } // namespace (anon)
-
-// namespace em {
-// namespace layers {
-
-// // --------------------------- SLOPE (rad) ---------------------------
-// void addSlope(grid_map::GridMap& map, double h)
-// {
-//   if (!map.exists("elevation")) return;
-//   const Matrix& Z = map["elevation"];
-
-//   Matrix slope(Z.rows(), Z.cols());
-//   const double dx = std::max(1e-9, h);
-//   const double dy = std::max(1e-9, h);
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index idx(*it);
-//     const float zc = Z(idx(0), idx(1));
-//     if (!isFiniteF(zc)) { slope(idx(0), idx(1)) = NaNf(); continue; }
-
-//     Index nx = idx; nx(0)++;  Index px = idx; px(0)--;
-//     Index ny = idx; ny(1)++;  Index py = idx; py(1)--;
-
-//     auto val = [&](const Index& i)->float {
-//       if (!insideIndex(map, i)) return zc;
-//       const float v = Z(i(0), i(1));
-//       return isFiniteF(v) ? v : zc;
-//     };
-
-//     const double dzdx = (val(nx) - val(px)) / (2.0 * dx);
-//     const double dzdy = (val(ny) - val(py)) / (2.0 * dy);
-//     const double grad = std::hypot(dzdx, dzdy);
-
-//     slope(idx(0), idx(1)) = static_cast<float>(std::atan(grad)); // rad
-//   }
-
-//   if (map.exists("slope")) map["slope"] = slope;
-//   else map.add("slope", slope);
-// }
-
-// // --------------------------- ROUGHNESS (m) ---------------------------
-// void addRoughness(grid_map::GridMap& map, double window_m)
-// {
-//   if (!map.exists("elevation")) return;
-//   const Matrix& Z = map["elevation"];
-//   Matrix R(Z.rows(), Z.cols());
-
-//   const int win  = metersToCells(map, window_m);
-//   const int half = std::max(1, win/2);
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index c(*it);
-//     const float zc = Z(c(0), c(1));
-//     if (!isFiniteF(zc)) { R(c(0), c(1)) = NaNf(); continue; }
-
-//     double sum=0.0, sum2=0.0; int n=0;
-//     for (int di=-half; di<=half; ++di) {
-//       for (int dj=-half; dj<=half; ++dj) {
-//         Index p(c(0)+di, c(1)+dj);
-//         if (!insideIndex(map, p)) continue;
-//         const float z = Z(p(0), p(1));
-//         if (!isFiniteF(z)) continue;
-//         sum  += z;
-//         sum2 += double(z)*double(z);
-//         ++n;
-//       }
-//     }
-//     if (n<3) { R(c(0), c(1)) = NaNf(); continue; }
-//     const double mean = sum / n;
-//     const double var  = std::max(0.0, (sum2 / n) - mean*mean);
-//     R(c(0), c(1)) = static_cast<float>(std::sqrt(var));
-//   }
-
-//   if (map.exists("roughness")) map["roughness"] = R;
-//   else map.add("roughness", R);
-// }
-
-// // --------------------------- STEP (m) ---------------------------
-// void addStep(grid_map::GridMap& map, double window_m)
-// {
-//   if (!map.exists("elevation")) return;
-//   const Matrix& Z = map["elevation"];
-//   Matrix S(Z.rows(), Z.cols());
-
-//   const int win  = metersToCells(map, window_m);
-//   const int half = std::max(1, win/2);
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index c(*it);
-//     const float zc = Z(c(0), c(1));
-//     if (!isFiniteF(zc)) { S(c(0), c(1)) = NaNf(); continue; }
-
-//     double sum=0.0; int n=0;
-//     for (int di=-half; di<=half; ++di) {
-//       for (int dj=-half; dj<=half; ++dj) {
-//         if (di==0 && dj==0) continue;
-//         Index p(c(0)+di, c(1)+dj);
-//         if (!insideIndex(map, p)) continue;
-//         const float z = Z(p(0), p(1));
-//         if (!isFiniteF(z)) continue;
-//         sum += z; ++n;
-//       }
-//     }
-//     if (n<3) { S(c(0), c(1)) = NaNf(); continue; }
-//     const double mean = sum / n;
-//     S(c(0), c(1)) = static_cast<float>(std::fabs(double(zc) - mean));
-//   }
-
-//   if (map.exists("step")) map["step"] = S;
-//   else map.add("step", S);
-// }
-
-// // --------------------------- OBSTÁCULOS (binario) ---------------------------
-// void addObstacleBinaryFromGeom(grid_map::GridMap& map,
-//                                double slope_thresh_rad,
-//                                double step_thresh_m)
-// {
-//   if (!map.exists("slope") || !map.exists("step")) return;
-//   const Matrix& S = map["slope"];
-//   const Matrix& H = map["step"];
-//   Matrix O(S.rows(), S.cols());
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index idx(*it);
-//     const float s = S(idx(0), idx(1));
-//     const float h = H(idx(0), idx(1));
-//     const bool s_bad = isFiniteF(s) && s >= slope_thresh_rad;
-//     const bool h_bad = isFiniteF(h) && h >= step_thresh_m;
-//     O(idx(0), idx(1)) = (s_bad || h_bad) ? 1.0f : 0.0f;
-//   }
-
-//   if (map.exists("obstacles")) map["obstacles"] = O;
-//   else map.add("obstacles", O);
-// }
-
-// // --------------------------- TRAVERSABILIDAD [0..1] ---------------------------
-// void addTraversabilityFromSlopeRough(grid_map::GridMap& map,
-//                                      double slope_max_rad,
-//                                      double rough_max_m,
-//                                      double w_slope,
-//                                      double w_rough)
-// {
-//   if (!map.exists("slope") || !map.exists("roughness")) return;
-//   const Matrix& S = map["slope"];
-//   const Matrix& R = map["roughness"];
-//   Matrix T(S.rows(), S.cols());
-
-//   const double ws = std::clamp(w_slope, 0.0, 1.0);
-//   const double wr = std::clamp(w_rough, 0.0, 1.0);
-//   const double wsum = std::max(1e-6, ws + wr);
-//   const double smax = std::max(1e-6, slope_max_rad);
-//   const double rmax = std::max(1e-6, rough_max_m);
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index idx(*it);
-//     const float s = S(idx(0), idx(1));
-//     const float r = R(idx(0), idx(1));
-//     if (!isFiniteF(s) || !isFiniteF(r)) { T(idx(0), idx(1)) = NaNf(); continue; }
-
-//     const double ns = 1.0 - std::clamp(double(s)/smax, 0.0, 1.0);
-//     const double nr = 1.0 - std::clamp(double(r)/rmax, 0.0, 1.0);
-//     const double t  = (ws*ns + wr*nr) / wsum;
-
-//     T(idx(0), idx(1)) = static_cast<float>(std::clamp(t, 0.0, 1.0));
-//   }
-
-//   if (map.exists("trav")) map["trav"] = T;
-//   else map.add("trav", T);
-// }
-
-// // --------------------------- CVaR TRAV -> cvar_risk ---------------------------
-// void addCvarTraversability(grid_map::GridMap& map,
-//                            double alpha,
-//                            double window_m)
-// {
-//   if (!map.exists("trav")) return;
-//   const Matrix& TR = map["trav"];
-//   Matrix CV(TR.rows(), TR.cols());
-
-//   const int win  = metersToCells(map, window_m);
-//   const int half = std::max(1, win/2);
-//   const double a = std::clamp(alpha, 0.0, 0.999);
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index c(*it);
-//     const float tc = TR(c(0), c(1));
-//     if (!isFiniteF(tc)) { CV(c(0), c(1)) = NaNf(); continue; }
-
-//     std::vector<double> risks;
-//     risks.reserve((2*half+1)*(2*half+1));
-
-//     for (int di=-half; di<=half; ++di) {
-//       for (int dj=-half; dj<=half; ++dj) {
-//         Index p(c(0)+di, c(1)+dj);
-//         if (!insideIndex(map, p)) continue;
-//         const float t = TR(p(0), p(1));
-//         if (!isFiniteF(t)) continue;
-//         risks.push_back(1.0 - double(t)); // riesgo = 1 - trav
-//       }
-//     }
-//     if (risks.size() < 5) { CV(c(0), c(1)) = NaNf(); continue; }
-
-//     std::sort(risks.begin(), risks.end()); // ascendente
-//     const size_t n = risks.size();
-//     const size_t q = std::min(n-1, static_cast<size_t>(std::ceil(a * (n - 1))));
-//     const double thresh = risks[q];
-
-//     double sumTail=0.0; size_t m=0;
-//     for (size_t k=q; k<n; ++k) { sumTail += risks[k]; ++m; }
-//     const double cvar_risk = (m>0) ? (sumTail / double(m)) : thresh;
-
-//     CV(c(0), c(1)) = static_cast<float>(std::clamp(cvar_risk, 0.0, 1.0));
-//   }
-
-//   // >>> Cambio pedido: escribir en "cvar_risk"
-//   if (map.exists("cvar_risk")) map["cvar_risk"] = CV;
-//   else map.add("cvar_risk", CV);
-// }
-
-// // --------------------------- NEGATIVE OBSTACLES (simple) ---------------------------
-// // Marca como 1.0 las celdas cuyo centro es significativamente más bajo
-// // que la media del anillo a ~ring_m, usando umbral drop_thresh_m.
-// void addNegativeObstacles(grid_map::GridMap& map,
-//                           double drop_thresh_m,
-//                           double ring_m)
-// {
-//   if (!map.exists("elevation")) return;
-//   const Matrix& Z = map["elevation"];
-
-//   Matrix NEG(Z.rows(), Z.cols());
-//   NEG.setZero();
-
-//   const int r = metersToCells(map, ring_m);
-//   const double r2_low  = std::pow(std::max(1, r/2), 2);   // anillo interior (suave)
-//   const double r2_high = std::pow(std::max(1, r),   2);   // anillo exterior
-
-//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-//     Index c(*it);
-//     const float zc = Z(c(0), c(1));
-//     if (!isFiniteF(zc)) { NEG(c(0), c(1)) = 0.0f; continue; }
-
-//     double sum=0.0; int n=0;
-//     for (int di=-r; di<=r; ++di) {
-//       for (int dj=-r; dj<=r; ++dj) {
-//         if (di==0 && dj==0) continue;
-//         const int d2 = di*di + dj*dj;
-//         if (d2 < r2_low || d2 > r2_high) continue; // aproximar anillo
-//         Index p(c(0)+di, c(1)+dj);
-//         if (!insideIndex(map, p)) continue;
-//         const float zn = Z(p(0), p(1));
-//         if (!isFiniteF(zn)) continue;
-//         sum += zn; ++n;
-//       }
-//     }
-
-//     if (n < 6) { NEG(c(0), c(1)) = 0.0f; continue; }
-//     const double ring_mean = sum / n;
-
-//     // Si la media del anillo está "bastante" por encima del centro => hueco/bache
-//     NEG(c(0), c(1)) = ((ring_mean - double(zc)) >= drop_thresh_m) ? 1.0f : 0.0f;
-//   }
-
-//   if (map.exists("negatives")) map["negatives"] = NEG;
-//   else map.add("negatives", NEG);
-// }
-
-// // --------------------------- NEGATIVE OBSTACLES (robusto wrapper) ---------------------------
-// void addNegativeObstaclesRobust(grid_map::GridMap& map,
-//                                 double drop_thresh_m,
-//                                 double ring_m,
-//                                 double /*min_valid_ratio*/,
-//                                 double /*slope_gate_rad*/,
-//                                 const std::string& /*elevation_layer*/,
-//                                 const std::string& /*slope_layer*/,
-//                                 const std::string& out_layer)
-// {
-//   // Para empezar, reutilizamos la versión simple.
-//   addNegativeObstacles(map, drop_thresh_m, ring_m);
-
-//   const std::string src = "negatives";
-//   if (!map.exists(src)) return;
-
-//   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-//   map[out_layer] = map[src];
-// }
-
-// // --------------------------- COMBINE TO FINAL ---------------------------
-// void combineToFinalObstacles(grid_map::GridMap& map,
-//                              const std::string& obstacles_layer,
-//                              const std::string& negatives_layer,
-//                              const std::string& cvar_layer,
-//                              double cvar_tau,
-//                              const std::string& out_layer)
-// {
-//   const bool have_obst = map.exists(obstacles_layer);
-//   const bool have_neg  = map.exists(negatives_layer);
-//   const bool have_cvar = map.exists(cvar_layer);
-
-//   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-//   auto& outM = map[out_layer];
-//   outM.setZero(); // conservar tamaño, poner a cero
-
-//   const grid_map::Matrix* obst = have_obst ? &map[obstacles_layer] : nullptr;
-//   const grid_map::Matrix* neg  = have_neg  ? &map[negatives_layer]  : nullptr;
-//   const grid_map::Matrix* cvar = have_cvar ? &map[cvar_layer]       : nullptr;
-
-//   const auto sz = map.getSize();
-//   const int nx = sz(0);
-//   const int ny = sz(1);
-
-//   for (int i = 0; i < nx; ++i) {
-//     for (int j = 0; j < ny; ++j) {
-//       float v = 0.0f;
-//       if (obst) v = std::max(v, (*obst)(i,j));
-//       if (neg)  v = std::max(v, (*neg)(i,j));
-//       if (cvar) {
-//         const float gate = ((*cvar)(i,j) > static_cast<float>(cvar_tau)) ? 1.0f : 0.0f;
-//         v = std::max(v, gate);
-//       }
-//       outM(i,j) = v;
-//     }
-//   }
-// }
-
-// } // namespace layers
-// } // namespace em
-
-
-// ////
-
-
-// // // } // namespace em::layers
-// // #include "elevation_mapping/layer_tools.hpp"
-// // #include <grid_map_core/iterators/GridMapIterator.hpp>
-// // #include <cmath>
-// // #include <algorithm>
-// // #include <vector>
-// // #include <limits>
-
-// // using grid_map::Index;
-// // using grid_map::Matrix;
-
-// // namespace {  // utilidades internas
-
-// // inline bool isFiniteF(float v) { return std::isfinite(static_cast<double>(v)); }
-// // inline float NaNf() { return std::numeric_limits<float>::quiet_NaN(); }
-
-// // inline int metersToCells(const grid_map::GridMap& map, double m)
-// // {
-// //   const double res = map.getResolution();
-// //   int cells = static_cast<int>(std::round(m / std::max(1e-9, res)));
-// //   return std::max(1, cells);
-// // }
-
-// // inline bool insideIndex(const grid_map::GridMap& map, const Index& i)
-// // {
-// //   const auto& sz = map.getSize();
-// //   return (i(0) >= 0 && i(1) >= 0 && i(0) < sz(0) && i(1) < sz(1));
-// // }
-
-// // } // namespace anónimo
-
-// // namespace em::layers {
-
-// // // --------------------------- SLOPE (rad) ---------------------------
-// // void addSlope(grid_map::GridMap& map, double h)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix slope(Z.rows(), Z.cols());
-// //   const double dx = std::max(1e-9, h);
-// //   const double dy = std::max(1e-9, h);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float zc = Z(idx(0), idx(1));
-// //     if (!isFiniteF(zc)) { slope(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     Index nx = idx; nx(0)++;  Index px = idx; px(0)--;
-// //     Index ny = idx; ny(1)++;  Index py = idx; py(1)--;
-
-// //     auto val = [&](const Index& i)->float {
-// //       if (!insideIndex(map, i)) return zc;
-// //       const float v = Z(i(0), i(1));
-// //       return isFiniteF(v) ? v : zc;
-// //     };
-
-// //     const double dzdx = (val(nx) - val(px)) / (2.0 * dx);
-// //     const double dzdy = (val(ny) - val(py)) / (2.0 * dy);
-// //     const double grad = std::hypot(dzdx, dzdy);
-
-// //     slope(idx(0), idx(1)) = static_cast<float>(std::atan(grad)); // rad
-// //   }
-
-// //   if (map.exists("slope")) map["slope"] = slope;
-// //   else map.add("slope", slope);
-// // }
-
-// // // --------------------------- ROUGHNESS (m) ---------------------------
-// // void addRoughness(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix R(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { R(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0, sum2=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; sum2 += double(z)*double(z); ++n;
-// //       }
-// //     }
-// //     if (n<3) { R(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     const double var  = std::max(0.0, (sum2 / n) - mean*mean);
-// //     R(c(0), c(1)) = static_cast<float>(std::sqrt(var));
-// //   }
-
-// //   if (map.exists("roughness")) map["roughness"] = R;
-// //   else map.add("roughness", R);
-// // }
-
-// // // --------------------------- STEP (m) ---------------------------
-// // void addStep(grid_map::GridMap& map, double window_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix S(Z.rows(), Z.cols());
-
-// //   const int win = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float zc = Z(c(0), c(1));
-// //     if (!isFiniteF(zc)) { S(c(0), c(1)) = NaNf(); continue; }
-
-// //     double sum=0.0; int n=0;
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         if (di==0 && dj==0) continue;
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float z = Z(p(0), p(1));
-// //         if (!isFiniteF(z)) continue;
-// //         sum += z; ++n;
-// //       }
-// //     }
-// //     if (n<3) { S(c(0), c(1)) = NaNf(); continue; }
-// //     const double mean = sum / n;
-// //     S(c(0), c(1)) = static_cast<float>(std::fabs(double(zc) - mean));
-// //   }
-
-// //   if (map.exists("step")) map["step"] = S;
-// //   else map.add("step", S);
-// // }
-
-// // // --------------------------- OBSTÁCULOS (0/1) ---------------------------
-// // void addObstacleBinaryFromGeom(grid_map::GridMap& map,
-// //                                double slope_thresh_rad,
-// //                                double step_thresh_m)
-// // {
-// //   if (!map.exists("slope") || !map.exists("step")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& H = map["step"];
-// //   Matrix O(S.rows(), S.cols());
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float h = H(idx(0), idx(1));
-// //     const bool s_bad = isFiniteF(s) && s >= slope_thresh_rad;
-// //     const bool h_bad = isFiniteF(h) && h >= step_thresh_m;
-// //     O(idx(0), idx(1)) = (s_bad || h_bad) ? 1.0f : 0.0f;
-// //   }
-
-// //   if (map.exists("obstacles")) map["obstacles"] = O;
-// //   else map.add("obstacles", O);
-// // }
-
-// // // --------------------------- TRAVERSABILIDAD [0..1] ---------------------------
-// // void addTraversabilityFromSlopeRough(grid_map::GridMap& map,
-// //                                      double slope_max_rad,
-// //                                      double rough_max_m,
-// //                                      double w_slope,
-// //                                      double w_rough)
-// // {
-// //   if (!map.exists("slope") || !map.exists("roughness")) return;
-// //   const Matrix& S = map["slope"];
-// //   const Matrix& R = map["roughness"];
-// //   Matrix T(S.rows(), S.cols());
-
-// //   const double ws = std::clamp(w_slope, 0.0, 1.0);
-// //   const double wr = std::clamp(w_rough, 0.0, 1.0);
-// //   const double wsum = std::max(1e-6, ws + wr);
-// //   const double smax = std::max(1e-6, slope_max_rad);
-// //   const double rmax = std::max(1e-6, rough_max_m);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index idx(*it);
-// //     const float s = S(idx(0), idx(1));
-// //     const float r = R(idx(0), idx(1));
-// //     if (!isFiniteF(s) || !isFiniteF(r)) { T(idx(0), idx(1)) = NaNf(); continue; }
-
-// //     const double ns = 1.0 - std::clamp(double(s)/smax, 0.0, 1.0);
-// //     const double nr = 1.0 - std::clamp(double(r)/rmax, 0.0, 1.0);
-// //     const double t  = (ws*ns + wr*nr) / wsum;
-
-// //     T(idx(0), idx(1)) = static_cast<float>(std::clamp(t, 0.0, 1.0));
-// //   }
-
-// //   if (map.exists("trav")) map["trav"] = T;
-// //   else map.add("trav", T);
-// // }
-
-// // // --------------------------- CVaR (riesgo) ---------------------------
-// // void addCvarTraversability(grid_map::GridMap& map,
-// //                            double alpha,
-// //                            double window_m)
-// // {
-// //   if (!map.exists("trav")) return;
-// //   const Matrix& TR = map["trav"];
-// //   Matrix CV(TR.rows(), TR.cols());
-
-// //   const int win  = metersToCells(map, window_m);
-// //   const int half = std::max(1, win/2);
-// //   const double a = std::clamp(alpha, 0.0, 0.999);
-
-// //   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
-// //     Index c(*it);
-// //     const float tc = TR(c(0), c(1));
-// //     if (!isFiniteF(tc)) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::vector<double> risks;
-// //     risks.reserve((2*half+1)*(2*half+1));
-
-// //     for (int di=-half; di<=half; ++di) {
-// //       for (int dj=-half; dj<=half; ++dj) {
-// //         Index p(c(0)+di, c(1)+dj);
-// //         if (!insideIndex(map, p)) continue;
-// //         const float t = TR(p(0), p(1));
-// //         if (!isFiniteF(t)) continue;
-// //         risks.push_back(1.0 - double(t)); // riesgo = 1 - trav
-// //       }
-// //     }
-// //     if (risks.size() < 5) { CV(c(0), c(1)) = NaNf(); continue; }
-
-// //     std::sort(risks.begin(), risks.end()); // asc
-// //     const size_t n = risks.size();
-// //     const size_t q = std::min(n-1, static_cast<size_t>(std::ceil(a * (n - 1))));
-// //     const double thresh = risks[q];
-
-// //     double sumTail=0.0; size_t m=0;
-// //     for (size_t k=q; k<n; ++k) { sumTail += risks[k]; ++m; }
-// //     const double cvar_risk = (m>0) ? (sumTail / double(m)) : thresh;
-
-// //     CV(c(0), c(1)) = static_cast<float>(std::clamp(cvar_risk, 0.0, 1.0));
-// //   }
-
-// //   // Escribimos riesgo (coincide con "cvar_risk" que usas en combineToFinalObstacles)
-// //   if (map.exists("cvar_risk")) map["cvar_risk"] = CV;
-// //   else map.add("cvar_risk", CV);
-// // }
-
-// // // --------------------------- NEGATIVE OBSTACLES (versión corta) ---------------------------
-// // // Marca "negatives" = 1 si el centro es significativamente más bajo que el anillo alrededor.
-// // void addNegativeObstacles(grid_map::GridMap& map,
-// //                           double drop_thresh_m,
-// //                           double ring_m)
-// // {
-// //   if (!map.exists("elevation")) return;
-// //   const Matrix& Z = map["elevation"];
-// //   Matrix N(Z.rows(), Z.cols());
-// //   N.setZero();
-
-// //   const int r = std::max(1, metersToCells(map, ring_m));
-// //   const int nx = map.getSize()(0);
-// //   const int ny = map.getSize()(1);
-
-// //   for (int i=0; i<nx; ++i) {
-// //     for (int j=0; j<ny; ++j) {
-// //       const float zc = Z(i,j);
-// //       if (!isFiniteF(zc)) { N(i,j) = 0.0f; continue; }
-
-// //       // Estadística del anillo (entre radio r y 2r, aproximado en cuadrado)
-// //       int cnt = 0;
-// //       double sum = 0.0;
-// //       for (int di=-2*r; di<=2*r; ++di) {
-// //         for (int dj=-2*r; dj<=2*r; ++dj) {
-// //           const int ad = std::abs(di) + std::abs(dj);
-// //           if (ad < r || ad > 2*r) continue;               // “anillo” taxicab
-// //           const int ii = i + di, jj = j + dj;
-// //           if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
-// //           const float zn = Z(ii, jj);
-// //           if (!isFiniteF(zn)) continue;
-// //           sum += zn; ++cnt;
-// //         }
-// //       }
-// //       if (cnt < 8) { N(i,j) = 0.0f; continue; }
-
-// //       const double ring_mean = sum / cnt;
-// //       const double drop = ring_mean - double(zc);
-// //       N(i,j) = (drop >= drop_thresh_m) ? 1.0f : 0.0f;
-// //     }
-// //   }
-
-// //   if (map.exists("negatives")) map["negatives"] = N;
-// //   else map.add("negatives", N);
-// // }
-
-// // // --------------------------- NEGATIVE robusta (envoltorio) ---------------------------
-// // void addNegativeObstaclesRobust(grid_map::GridMap& map,
-// //                                 double drop_thresh_m,
-// //                                 double ring_m,
-// //                                 double /*min_valid_ratio*/,
-// //                                 double /*slope_gate_rad*/,
-// //                                 const std::string& /*elevation_layer*/,
-// //                                 const std::string& /*slope_layer*/,
-// //                                 const std::string& out_layer)
-// // {
-// //   // Reutiliza la versión corta que produce "negatives"
-// //   addNegativeObstacles(map, drop_thresh_m, ring_m);
-
-// //   if (!map.exists("negatives")) return;
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   map[out_layer] = map["negatives"];
-// // }
-
-// // // --------------------------- Combinar capas ---------------------------
-// // void combineToFinalObstacles(grid_map::GridMap& map,
-// //                              const std::string& obstacles_layer,
-// //                              const std::string& negatives_layer,
-// //                              const std::string& cvar_layer,
-// //                              double cvar_tau,
-// //                              const std::string& out_layer)
-// // {
-// //   const bool have_obst = map.exists(obstacles_layer);
-// //   const bool have_neg  = map.exists(negatives_layer);
-// //   const bool have_cvar = map.exists(cvar_layer);
-
-// //   if (!map.exists(out_layer)) map.add(out_layer, 0.0f);
-// //   auto& outM = map[out_layer];
-
-// //   const int nx = map.getSize()(0);
-// //   const int ny = map.getSize()(1);
-
-// //   const grid_map::Matrix* obst = have_obst ? &map[obstacles_layer] : nullptr;
-// //   const grid_map::Matrix* neg  = have_neg  ? &map[negatives_layer]  : nullptr;
-// //   const grid_map::Matrix* cvar = have_cvar ? &map[cvar_layer]       : nullptr;
-
-// //   outM.setZero(nx, ny);
-
-// //   for (int i = 0; i < nx; ++i) {
-// //     for (int j = 0; j < ny; ++j) {
-// //       float v = 0.0f;
-// //       if (obst) v = std::max(v, (*obst)(i,j));
-// //       if (neg)  v = std::max(v, (*neg)(i,j));
-// //       if (cvar) {
-// //         const float gate = ((*cvar)(i,j) > static_cast<float>(cvar_tau)) ? 1.0f : 0.0f; // cvar = riesgo
-// //         v = std::max(v, gate);
-// //       }
-// //       outM(i,j) = v;
-// //     }
-// //   }
-// // }
-
-// // } // namespace em::layers
-// layer_tools.cpp
-//
-// Utilidades de capas para elevation_mapping.
-// Nota: Implementaciones sencillas y robustas, cuidadosas con NaNs.
-//
-// Requiere: grid_map_core
-
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -1784,6 +413,403 @@ void combineToFinalObstacles(grid_map::GridMap& map,
     writeCell(Mout, I, occ ? 1.0f : 0.0f);
   }
 }
+
+
+
+
+
+
+
+/**
+ * Crea una capa binaria "grid" (0/1) de celdas conocidas (elevation no NaN)
+ * Opcionalmente, si gate_by_variance=true, filtra también por varianza < var_thresh.
+ */
+
+void addGridKnown(grid_map::GridMap& map,
+                  bool gate_by_variance,
+                  double var_thresh,
+                  const std::string& elevation_layer = "elevation",
+                  const std::string& variance_layer  = "variance",
+                  const std::string& out_layer       = "grid") {
+  if (!map.exists(elevation_layer)) return;
+  ensureLayer(map, out_layer);
+
+  const auto& Me = map[elevation_layer];
+  const bool haveVar = gate_by_variance && map.exists(variance_layer);
+  const grid_map::Matrix* Mv = haveVar ? &map[variance_layer] : nullptr;
+
+  auto& Mg = map[out_layer];
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    const float h = readCell(Me, I);
+    if (!isFinite(h)) { writeCell(Mg, I, 0.0f); continue; }
+
+    if (haveVar) {
+      const float v = readCell(*Mv, I);
+      if (!isFinite(v) || v > static_cast<float>(var_thresh)) {
+        writeCell(Mg, I, 0.0f); // conocido pero poco confiable -> trata como desconocido
+        continue;
+      }
+    }
+    writeCell(Mg, I, 1.0f); // conocido
+  }
+}
+
+/**
+ * Calcula "frontier" = celdas conocidas (grid==1) que tocan alguna celda desconocida (grid==0).
+ * edge_is_unknown: si true, los bordes fuera de índice cuentan como desconocidos -> marcan frontera.
+ */
+void addFrontierFromGrid(grid_map::GridMap& map,
+                         const std::string& grid_layer   = "grid",
+                         const std::string& out_layer    = "frontier",
+                         bool edge_is_unknown            = true) {
+  if (!map.exists(grid_layer)) return;
+  ensureLayer(map, out_layer);
+
+  const auto& Mg = map[grid_layer];
+  auto& Mf = map[out_layer];
+
+  const auto size = map.getSize();
+  const int H = size(0), W = size(1);
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    const int i = I(0), j = I(1);
+
+    const float g = readCell(Mg, I);
+    if (!isFinite(g) || g < 0.5f) { writeCell(Mf, I, 0.0f); continue; }
+
+    bool is_frontier = false;
+    for (int di = -1; di <= 1 && !is_frontier; ++di) {
+      for (int dj = -1; dj <= 1 && !is_frontier; ++dj) {
+        if (di == 0 && dj == 0) continue;
+        const int ni = i + di;
+        const int nj = j + dj;
+        if (ni < 0 || nj < 0 || ni >= H || nj >= W) {
+          if (edge_is_unknown) is_frontier = true;
+          continue;
+        }
+        const grid_map::Index N(ni, nj);
+        const float gn = readCell(Mg, N);
+        if (!isFinite(gn) || gn < 0.5f) {
+          is_frontier = true;
+        }
+      }
+    }
+
+    writeCell(Mf, I, is_frontier ? 1.0f : 0.0f);
+  }
+}
+/**
+ * Convierte una capa de ocupación estilo OccupancyGrid (unknown=-1, free=0, occupied=100)
+ * a una máscara binaria (unknown=NaN, free=0, occupied=1).
+ */
+void occupancyLikeToMask(grid_map::GridMap& map,
+                         const std::string& src_layer,
+                         const std::string& dst_layer) {
+  if (!map.exists(src_layer)) return;
+  ensureLayer(map, dst_layer);
+  const auto& S = map[src_layer];
+  auto& D = map[dst_layer];
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const auto I = grid_map::Index(*it);
+    const float v = readCell(S, I);
+    if (!std::isfinite(v) || v < 0.0f) {
+      writeCell(D, I, std::numeric_limits<float>::quiet_NaN()); // unknown
+    } else if (v >= 50.0f) {
+      writeCell(D, I, 1.0f);  // occupied
+    } else {
+      writeCell(D, I, 0.0f);  // free
+    }
+  }
+}
+/**
+ * (Opcional) Si ya combinas obstáculos en, p.ej., "final_obstacles" (0/1),
+ * genera una ocupación 3-estados estilo OccupancyGrid:
+ *   unknown = -1, free = 0, occupied = 100  (en float)
+ */
+void addOccupancyLike(grid_map::GridMap& map,
+                      const std::string& grid_known_layer = "grid",
+                      const std::string& obstacles_layer  = "final_obstacles",
+                      const std::string& out_layer        = "occupancy_like") {
+  if (!map.exists(grid_known_layer)) return;
+  ensureLayer(map, out_layer);
+
+  const auto& Mk = map[grid_known_layer];
+  const grid_map::Matrix* Mo = map.exists(obstacles_layer) ? &map[obstacles_layer] : nullptr;
+  auto& Mout = map[out_layer];
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    const float k = readCell(Mk, I);
+
+    if (!isFinite(k) || k < 0.5f) {
+      writeCell(Mout, I, -1.0f); // desconocido
+      continue;
+    }
+    bool occ = false;
+    if (Mo) {
+      const float o = readCell(*Mo, I);
+      occ = (isFinite(o) && o >= 0.5f);
+    }
+    writeCell(Mout, I, occ ? 100.0f : 0.0f);
+  }
+}
+
+static inline float norm01(float v, double vmin, double vmax) {
+  if (!std::isfinite(v)) return std::numeric_limits<float>::quiet_NaN();
+  if (vmax <= vmin) return std::numeric_limits<float>::quiet_NaN();
+  double x = (v - vmin) / (vmax - vmin);
+  if (x < 0.0) x = 0.0;
+  if (x > 1.0) x = 1.0;
+  return static_cast<float>(x);
+}
+
+// Vecindario circular (disco) de radio r (en celdas)
+static void neighborhoodIndicesDisk(const grid_map::GridMap& map,
+                                    const grid_map::Index& center,
+                                    int r,
+                                    std::vector<grid_map::Index>& out) {
+  out.clear();
+  const auto size = map.getSize();
+  const int i0 = clampi(center(0) - r, 0, size(0) - 1);
+  const int i1 = clampi(center(0) + r, 0, size(0) - 1);
+  const int j0 = clampi(center(1) - r, 0, size(1) - 1);
+  const int j1 = clampi(center(1) + r, 0, size(1) - 1);
+  const int r2 = r * r;
+  for (int i = i0; i <= i1; ++i) {
+    for (int j = j0; j <= j1; ++j) {
+      const int di = i - center(0);
+      const int dj = j - center(1);
+      if (di*di + dj*dj <= r2) out.emplace_back(grid_map::Index(i, j));
+    }
+  }
+}
+
+
+
+/**
+ * Suma ponderada de capas de coste normalizadas -> out_layer (e.g., "multi_cost").
+ * - layers[k] se normaliza con minmax[k] a [0,1] y se multiplica por weights[k].
+ * - Si ninguna capa es válida en una celda: escribe NaN.
+ */
+void addMultiCost(grid_map::GridMap& map,
+                  const std::vector<std::string>& layers,
+                  const std::vector<double>& weights,
+                  const std::vector<std::pair<double,double>>& minmax,
+                  const std::string& out_layer = "multi_cost") {
+  if (layers.empty() || layers.size() != weights.size() || layers.size() != minmax.size()) return;
+  for (const auto& L : layers) if (!map.exists(L)) return;
+
+  ensureLayer(map, out_layer);
+  auto& Mout = map[out_layer];
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    double acc = 0.0; bool any = false;
+    for (size_t k = 0; k < layers.size(); ++k) {
+      const auto& M = map[layers[k]];
+      const float v = readCell(M, I);
+      const float n = norm01(v, minmax[k].first, minmax[k].second);
+      if (std::isfinite(n)) {
+        acc += weights[k] * static_cast<double>(n);
+        any = true;
+      }
+    }
+    writeCell(Mout, I, any ? static_cast<float>(acc) : std::numeric_limits<float>::quiet_NaN());
+  }
+}
+
+/**
+ * Umbraliza una capa de coste -> máscara binaria no_go (0/1).
+ * Opcionalmente dilata con un radio en metros para margen de seguridad.
+ */
+void addNoGoFromCost(grid_map::GridMap& map,
+                     const std::string& cost_layer,
+                     double tau,
+                     double inflate_radius_m,
+                     const std::string& out_layer = "no_go") {
+  if (!map.exists(cost_layer)) return;
+  ensureLayer(map, out_layer);
+
+  const auto& Mc = map[cost_layer];
+  auto& Mng = map[out_layer];
+
+  const double res = map.getResolution();
+  const int r = (inflate_radius_m > 0.0) ? std::max(1, static_cast<int>(std::round(inflate_radius_m / res))) : 0;
+
+  // Paso 1: máscara base
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    const float c = readCell(Mc, I);
+    writeCell(Mng, I, (std::isfinite(c) && c >= static_cast<float>(tau)) ? 1.0f : 0.0f);
+  }
+
+  if (r <= 0) return;
+
+  // Paso 2: dilatación circular (margen)
+  grid_map::Matrix Mcopy = Mng; // copia
+  std::vector<grid_map::Index> neigh;
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    if (readCell(Mcopy, I) >= 0.5f) {
+      neighborhoodIndicesDisk(map, I, r, neigh);
+      for (const auto& N : neigh) writeCell(Mng, N, 1.0f);
+    }
+  }
+}
+
+/**
+ * Filtra "frontier" usando "no_go": mantiene frontera solo donde no_go==0
+ * y además a cierta "clearance_m" (dilatación de no_go).
+ * Escribe resultado en out_layer (e.g., "frontier_ok").
+ */
+void filterFrontierByNoGo(grid_map::GridMap& map,
+                          const std::string& frontier_layer = "frontier",
+                          const std::string& no_go_layer    = "no_go",
+                          double clearance_m                 = 0.0,
+                          const std::string& out_layer       = "frontier_ok") {
+  if (!map.exists(frontier_layer) || !map.exists(no_go_layer)) return;
+  ensureLayer(map, out_layer);
+
+  const auto& Mf = map[frontier_layer];
+  const auto& Mng = map[no_go_layer];
+  auto& Mout = map[out_layer];
+
+  const double res = map.getResolution();
+  const int r = (clearance_m > 0.0) ? std::max(1, static_cast<int>(std::round(clearance_m / res))) : 0;
+
+  // Precalcular no_go dilatado a "clearance"
+  grid_map::Matrix Mblk = Mng;
+  if (r > 0) {
+    grid_map::Matrix base = Mng;
+    std::vector<grid_map::Index> neigh;
+    for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+      const grid_map::Index I(*it);
+      if (readCell(base, I) >= 0.5f) {
+        neighborhoodIndicesDisk(map, I, r, neigh);
+        for (const auto& N : neigh) writeCell(Mblk, N, 1.0f);
+      }
+    }
+  }
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    const float fr = readCell(Mf, I);
+    const float blk= readCell(Mblk, I);
+    const bool keep = (std::isfinite(fr) && fr >= 0.5f) && !(std::isfinite(blk) && blk >= 0.5f);
+    writeCell(Mout, I, keep ? 1.0f : 0.0f);
+  }
+}
+
+/**
+ * Estampa vetos ("no se puede ir por aquí") en 'no_go' a partir de índices
+ * o posiciones (elige una de las dos sobrecargas). Útil para feedback del planificador.
+ */
+void stampNoGoAtIndices(grid_map::GridMap& map,
+                        const std::vector<grid_map::Index>& inds,
+                        double radius_m,
+                        const std::string& no_go_layer = "no_go") {
+  ensureLayer(map, no_go_layer);
+  auto& Mng = map[no_go_layer];
+  const double res = map.getResolution();
+  const int r = std::max(1, static_cast<int>(std::round(radius_m / res)));
+
+  std::vector<grid_map::Index> neigh;
+  for (const auto& I : inds) {
+    if (!validIndex(map, I)) continue;
+    neighborhoodIndicesDisk(map, I, r, neigh);
+    for (const auto& N : neigh) writeCell(Mng, N, 1.0f);
+  }
+}
+
+void stampNoGoAtPositions(grid_map::GridMap& map,
+                          const std::vector<grid_map::Position>& poss,
+                          double radius_m,
+                          const std::string& no_go_layer = "no_go") {
+  std::vector<grid_map::Index> inds; inds.reserve(poss.size());
+  for (const auto& p : poss) {
+    grid_map::Index I;
+    if (map.getIndex(p, I)) inds.push_back(I);
+  }
+  stampNoGoAtIndices(map, inds, radius_m, no_go_layer);
+}
+
+/**
+ * Decaimiento de una máscara binaria/continua (e.g., no_go) para que el veto
+ * no sea permanente. Aplica: v = max(0, v - rate*dt).
+ */
+void decayLayer(grid_map::GridMap& map,
+                const std::string& layer,
+                double rate_per_sec,
+                double dt_sec) {
+  if (!map.exists(layer)) return;
+  auto& M = map[layer];
+  const float d = static_cast<float>(std::max(0.0, rate_per_sec * dt_sec));
+
+  for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+    const grid_map::Index I(*it);
+    float v = readCell(M, I);
+    if (!std::isfinite(v)) continue;
+    v = std::max(0.0f, v - d);
+    writeCell(M, I, v);
+  }
+}
+
+
+
+// void addNoGoHard(grid_map::GridMap& map,
+//                  double slope_blocking_rad,
+//                  double rough_blocking_m,
+//                  bool use_obstacles,
+//                  bool use_negatives,
+//                  bool use_cvar,
+//                  double cvar_tau,
+//                  double inflate_radius_m,
+//                  const std::string& out_layer) {
+//   ensureLayer(map, out_layer);
+//   auto& Mout = map[out_layer];
+
+//   const grid_map::Matrix* Ms = map.exists("slope")        ? &map["slope"]        : nullptr;
+//   const grid_map::Matrix* Mr = map.exists("rough")        ? &map["rough"]        : nullptr;
+//   const grid_map::Matrix* Mo = (use_obstacles && map.exists("obstacles")) ? &map["obstacles"] : nullptr;
+//   const grid_map::Matrix* Mn = (use_negatives  && map.exists("negatives")) ? &map["negatives"] : nullptr;
+//   const grid_map::Matrix* Mc = (use_cvar       && map.exists("cvar_risk")) ? &map["cvar_risk"] : nullptr;
+
+//   ensureLayer(map, out_layer);
+//   auto& Mout = map[out_layer];
+//   ensureLayer(map, "no_go_why");               // <- nueva capa de debug
+//   auto& Mwhy = map["no_go_why"];            // 0=libre, 1=obst, 2=neg, 3=slope, 4=rough, 5=cvar
+
+//   for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+//     const grid_map::Index I(*it);
+//     bool occ = false;
+
+//     if (Mo) { const float v = readCell(*Mo, I); occ = occ || (std::isfinite(v) && v >= 0.5f); }
+//     if (Mn) { const float v = readCell(*Mn, I); occ = occ || (std::isfinite(v) && v >= 0.5f); }
+//     if (Ms) { const float v = readCell(*Ms, I); occ = occ || (std::isfinite(v) && v >  static_cast<float>(slope_blocking_rad)); }
+//     if (Mr) { const float v = readCell(*Mr, I); occ = occ || (std::isfinite(v) && v >  static_cast<float>(rough_blocking_m)); }
+//     if (Mc) { const float v = readCell(*Mc, I); occ = occ || (std::isfinite(v) && v >= static_cast<float>(cvar_tau)); }
+
+//     writeCell(Mout, I, occ ? 1.0f : 0.0f);
+//   }
+
+//   // Inflado opcional (margen de seguridad)
+//   if (inflate_radius_m > 0.0) {
+//     const int r = std::max(1, static_cast<int>(std::round(inflate_radius_m / map.getResolution())));
+//     grid_map::Matrix copy = Mout;
+//     std::vector<grid_map::Index> neigh;
+//     for (grid_map::GridMapIterator it(map); !it.isPastEnd(); ++it) {
+//       const grid_map::Index I(*it);
+//       if (readCell(copy, I) >= 0.5f) {
+//         neighborhoodIndicesDisk(map, I, r, neigh);
+//         for (const auto& N : neigh) writeCell(Mout, N, 1.0f);
+//       }
+//     }
+//   }
+// }
+
 
 } // namespace layers
 } // namespace em

@@ -26,6 +26,7 @@
 #include <tf2_ros/transform_listener.h>
 #include <std_msgs/msg/string.hpp>
 #include "tf2_ros/transform_broadcaster.h"
+#include <visualization_msgs/msg/marker_array.hpp>
 
 // Eigen
 #include <Eigen/Core>
@@ -62,7 +63,7 @@ class ElevationMapping {
       // límites “robot-aware”
       double slope_long_max_rad = 0.52; // ~30°
       double slope_lat_max_rad  = 0.35; // ~20°
-      double step_max_m         = 0.12;
+      double step_max_m         = 0.80;
       double clearance_min_m    = 0.03;
 
       // geometría robot
@@ -76,12 +77,31 @@ class ElevationMapping {
       double trav_w_rough       = 0.5;
       double cvar_alpha         = 0.90;
       double cvar_window_m      = 0.60;
+      // grid + frontier
+      double grid_var_thresh = 0.1;
+      bool   grid_gate_by_variance = false;
+      bool   frontier_edge_is_unknown = true;
+      double multi_cost_tau = 0.60;
+      double no_go_inflate_m = 0.20;
+      double frontier_clearance_m = 0.10;
+
+      // no-go
+      bool   no_go_use_multi_cost{false};
+      double no_go_slope_blocking_rad{0.55};
+      double no_go_rough_blocking_m{0.08};
+      bool   no_go_use_obstacles{true};
+      bool   no_go_use_negatives{true};
+      bool   no_go_use_cvar{false};
+      double no_go_cvar_tau{0.90};
+
     };
     struct LayersEnable {
     bool slope = true, rough = true, step = true;
     bool obstacles_binary = true;
     bool negative = true;
     bool cvar = true;
+    bool grid = true, frontier = true, multi_cost = true, no_go = true, frontier_filter = true, occupancy_like = false;
+
   };
   struct RatesConfig {
     int   heavy_every_n = 3;    // cada N nubes
@@ -334,6 +354,9 @@ class ElevationMapping {
   rclcpp::Service<grid_map_msgs::srv::ProcessFile>::SharedPtr saveMapService_;
   rclcpp::Service<grid_map_msgs::srv::ProcessFile>::SharedPtr loadMapService_;
 
+  //! ROS publisher.
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr occupancyPub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debugMarkersPub_;
   //! Callback thread for the fusion services.
   boost::thread fusionServiceThread_;
 
