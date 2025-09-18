@@ -286,10 +286,10 @@ bool ElevationMapping::readParameters() {
   nodeHandle_->get_parameter("cvar_tau", rates_.cvar_tau);
 
   // Negative robusto
-  nodeHandle_->declare_parameter("negative_min_valid", 0.30);
-  nodeHandle_->declare_parameter("negative_slope_gate", 0.25);
-  nodeHandle_->declare_parameter("negative_drop_thresh_m", 0.20);
-  nodeHandle_->declare_parameter("negative_ring_m", 0.30);
+  nodeHandle_->declare_parameter("negative_min_valid", 0.50);
+  nodeHandle_->declare_parameter("negative_slope_gate", 0.35);
+  nodeHandle_->declare_parameter("negative_drop_thresh_m", 0.25);
+  nodeHandle_->declare_parameter("negative_ring_m", 0.40);
 
   nodeHandle_->get_parameter("negative_min_valid",  rates_.neg_min_valid_ratio);
   nodeHandle_->get_parameter("negative_slope_gate", rates_.neg_slope_gate_rad);
@@ -867,39 +867,120 @@ auto& gm = map_.getRawGridMap();
   }
 //NAVGRID final: desconocido/libre/ocupado usando no_go_cap
 {
-  auto& gm = map_.getRawGridMap();
-  const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
-  const std::string cap  = "no_go_cap";
-  const std::string out  = "navgrid"; // NaN=desconocido, 0.0=libre, 1.0=ocupado
+  // auto& gm = map_.getRawGridMap();
+  // const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
+  // const std::string cap  = "no_go_cap";
+  // const std::string out  = "navgrid"; // NaN=desconocido, 0.0=libre, 1.0=ocupado
 
-  if (!gm.exists(elev) || !gm.exists(cap)) {
-    RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), cap.c_str());
-  } else {
-    if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
+  // if (!gm.exists(elev) || !gm.exists(cap)) {
+  //   RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), cap.c_str());
+  // } else {
+  //   if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
 
-    auto& L       = gm[out];
-    const auto& E = gm[elev];
-    const auto& C = gm[cap];
+  //   auto& L       = gm[out];
+  //   const auto& E = gm[elev];
+  //   const auto& C = gm[cap];
 
-    for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
-      const grid_map::Index idx(*it);
-      const float e = E(idx(0), idx(1));
-      if (std::isnan(e)) {
-        L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();
-      } else {
-        L(idx(0), idx(1)) = (C(idx(0), idx(1)) > 0.5f) ? 1.0f : 0.0f;
+  //   for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+  //     const grid_map::Index idx(*it);
+  //     const float e = E(idx(0), idx(1));
+  //     if (std::isnan(e)) {
+  //       L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();
+  //     } else {
+  //       L(idx(0), idx(1)) = (C(idx(0), idx(1)) > 0.5f) ? 1.0f : 0.0f;
+  //     }
+  //   }
+
+  //   // Publica OccupancyGrid (0->0, 1->100, NaN->-1)
+  //   if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
+  //     nav_msgs::msg::OccupancyGrid og;
+  //     grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
+  //     og.header.stamp    = nodeHandle_->get_clock()->now();
+  //     og.header.frame_id = gm.getFrameId();
+  //     occupancyPub_->publish(og);
+  //   }
+  // }
+
+
+  // --- NAVGRID desde NEGATIVES con tau parametrizable + filtro anti-puntos ---
+auto& gm = map_.getRawGridMap();
+const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
+const std::string neg  = "negatives";
+const std::string out  = "navgrid";
+
+double navgrid_tau = 0.65;
+nodeHandle_->get_parameter("navgrid_tau", navgrid_tau);
+
+if (gm.exists(elev) && gm.exists(neg)) {
+  if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
+
+  grid_map::Matrix& L       = gm[out];
+  const grid_map::Matrix& E = gm[elev];
+  const grid_map::Matrix& N = gm[neg];
+
+  // 1) Umbral
+  for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+    const grid_map::Index idx(*it);
+    const float e = E(idx(0), idx(1));
+    if (std::isnan(e)) {
+      L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();  // desconocido
+    } else {
+      const float nv = N(idx(0), idx(1));
+      L(idx(0), idx(1)) = (nv > static_cast<float>(navgrid_tau)) ? 1.0f : 0.0f;  // 1=ocupado, 0=libre
+    }
+  }
+
+  // 2) Filtro 3×3 para eliminar puntos sueltos ocupados (apertura suave)
+  grid_map::Matrix Lcopy = L;
+  auto is_occ = [&](int x, int y)->bool {
+    const float v = Lcopy(x,y);
+    return (!std::isnan(v) && v > 0.5f);
+  };
+
+  const auto size = gm.getSize(); // size(0)=Nx, size(1)=Ny
+
+
+  auto inBounds = [&](int x, int y) -> bool {
+  return (x >= 0 && y >= 0 && x < size(0) && y < size(1));
+  };
+
+  for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+    const grid_map::Index idx(*it);
+    const float v = Lcopy(idx(0), idx(1));
+
+    if (!std::isfinite(v)) continue;  // dejamos desconocidos como están
+    if (v <= 0.5f) continue;          // solo tocamos ocupados
+
+    int occ_nb = 0;
+    for (int dx = -1; dx <= 1; ++dx) {
+      for (int dy = -1; dy <= 1; ++dy) {
+        if (dx == 0 && dy == 0) continue;
+
+        const int nx = idx(0) + dx;
+        const int ny = idx(1) + dy;
+        if (!inBounds(nx, ny)) continue;       // <-- reemplaza la llamada errónea
+        if (is_occ(nx, ny)) ++occ_nb;
       }
     }
 
-    // Publica OccupancyGrid (0->0, 1->100, NaN->-1)
-    if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
-      nav_msgs::msg::OccupancyGrid og;
-      grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
-      og.header.stamp    = nodeHandle_->get_clock()->now();
-      og.header.frame_id = gm.getFrameId();
-      occupancyPub_->publish(og);
+    if (occ_nb <= 1) {
+      // si está solo o casi solo, bórralo
+      L(idx(0), idx(1)) = 0.0f;
     }
   }
+
+  // Publicar OccupancyGrid (0->libre, 1->ocupado, NaN->desconocido)
+  if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
+    nav_msgs::msg::OccupancyGrid og;
+    grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
+    og.header.stamp    = nodeHandle_->get_clock()->now();
+    og.header.frame_id = gm.getFrameId();
+    occupancyPub_->publish(og);
+  }
+} else {
+  RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), neg.c_str());
+}
+
 }
 
 
@@ -1338,39 +1419,117 @@ auto& gm = map_.getRawGridMap();
 //////////////////// 
 //navgird con constantes
 {
+// auto& gm = map_.getRawGridMap();
+//   const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
+//   const std::string cap  = "no_go_cap";
+//   const std::string out  = "navgrid"; // NaN=desconocido, 0.0=libre, 1.0=ocupado
+
+//   if (!gm.exists(elev) || !gm.exists(cap)) {
+//     RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), cap.c_str());
+//   } else {
+//     if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
+
+//     auto& L       = gm[out];
+//     const auto& E = gm[elev];
+//     const auto& C = gm[cap];
+
+//     for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+//       const grid_map::Index idx(*it);
+//       const float e = E(idx(0), idx(1));
+//       if (std::isnan(e)) {
+//         L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();
+//       } else {
+//         L(idx(0), idx(1)) = (C(idx(0), idx(1)) > 0.5f) ? 1.0f : 0.0f;
+//       }
+//     }
+
+//     // Publica OccupancyGrid (0->0, 1->100, NaN->-1)
+//     if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
+//       nav_msgs::msg::OccupancyGrid og;
+//       grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
+//       og.header.stamp    = nodeHandle_->get_clock()->now();
+//       og.header.frame_id = gm.getFrameId();
+//       occupancyPub_->publish(og);
+//     }
+//   }
+// --- NAVGRID desde NEGATIVES con tau parametrizable + filtro anti-puntos ---
 auto& gm = map_.getRawGridMap();
-  const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
-  const std::string cap  = "no_go_cap";
-  const std::string out  = "navgrid"; // NaN=desconocido, 0.0=libre, 1.0=ocupado
+const std::string elev = gm.exists("elevation_inpainted") ? "elevation_inpainted" : "elevation";
+const std::string neg  = "negatives";
+const std::string out  = "navgrid";
 
-  if (!gm.exists(elev) || !gm.exists(cap)) {
-    RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), cap.c_str());
-  } else {
-    if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
+double navgrid_tau = 0.65;
+nodeHandle_->get_parameter("navgrid_tau", navgrid_tau);
 
-    auto& L       = gm[out];
-    const auto& E = gm[elev];
-    const auto& C = gm[cap];
+if (gm.exists(elev) && gm.exists(neg)) {
+  if (!gm.exists(out)) gm.add(out, std::numeric_limits<float>::quiet_NaN());
 
-    for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
-      const grid_map::Index idx(*it);
-      const float e = E(idx(0), idx(1));
-      if (std::isnan(e)) {
-        L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();
-      } else {
-        L(idx(0), idx(1)) = (C(idx(0), idx(1)) > 0.5f) ? 1.0f : 0.0f;
-      }
-    }
+  grid_map::Matrix& L       = gm[out];
+  const grid_map::Matrix& E = gm[elev];
+  const grid_map::Matrix& N = gm[neg];
 
-    // Publica OccupancyGrid (0->0, 1->100, NaN->-1)
-    if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
-      nav_msgs::msg::OccupancyGrid og;
-      grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
-      og.header.stamp    = nodeHandle_->get_clock()->now();
-      og.header.frame_id = gm.getFrameId();
-      occupancyPub_->publish(og);
+  // 1) Umbral
+  for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+    const grid_map::Index idx(*it);
+    const float e = E(idx(0), idx(1));
+    if (std::isnan(e)) {
+      L(idx(0), idx(1)) = std::numeric_limits<float>::quiet_NaN();  // desconocido
+    } else {
+      const float nv = N(idx(0), idx(1));
+      L(idx(0), idx(1)) = (nv > static_cast<float>(navgrid_tau)) ? 1.0f : 0.0f;  // 1=ocupado, 0=libre
     }
   }
+
+  // 2) Filtro 3×3 para eliminar puntos sueltos ocupados (apertura suave)
+  grid_map::Matrix Lcopy = L;
+  auto is_occ = [&](int x, int y)->bool {
+    const float v = Lcopy(x,y);
+    return (!std::isnan(v) && v > 0.5f);
+  };
+
+  const auto size = gm.getSize(); // size(0)=Nx, size(1)=Ny
+
+
+  auto inBounds = [&](int x, int y) -> bool {
+  return (x >= 0 && y >= 0 && x < size(0) && y < size(1));
+};
+
+for (grid_map::GridMapIterator it(gm); !it.isPastEnd(); ++it) {
+  const grid_map::Index idx(*it);
+  const float v = Lcopy(idx(0), idx(1));
+
+  if (!std::isfinite(v)) continue;  // dejamos desconocidos como están
+  if (v <= 0.5f) continue;          // solo tocamos ocupados
+
+  int occ_nb = 0;
+  for (int dx = -1; dx <= 1; ++dx) {
+    for (int dy = -1; dy <= 1; ++dy) {
+      if (dx == 0 && dy == 0) continue;
+
+      const int nx = idx(0) + dx;
+      const int ny = idx(1) + dy;
+      if (!inBounds(nx, ny)) continue;       // <-- reemplaza la llamada errónea
+      if (is_occ(nx, ny)) ++occ_nb;
+    }
+  }
+
+  if (occ_nb <= 1) {
+    // si está solo o casi solo, bórralo
+    L(idx(0), idx(1)) = 0.0f;
+  }
+}
+
+  // Publicar OccupancyGrid (0->libre, 1->ocupado, NaN->desconocido)
+  if (occupancyPub_ && occupancyPub_->get_subscription_count() > 0) {
+    nav_msgs::msg::OccupancyGrid og;
+    grid_map::GridMapRosConverter::toOccupancyGrid(gm, out, 0.0f, 1.0f, og);
+    og.header.stamp    = nodeHandle_->get_clock()->now();
+    og.header.frame_id = gm.getFrameId();
+    occupancyPub_->publish(og);
+  }
+} else {
+  RCLCPP_WARN(nodeHandle_->get_logger(), "navgrid: faltan capas '%s' o '%s'", elev.c_str(), neg.c_str());
+}
 }
 ////////////////////////////////
 
