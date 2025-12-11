@@ -57,7 +57,7 @@ class ElevationMapping {
       // --- CONFIGURACIÓN DE CAPAS (PARAMS) ---
     struct LayerConfig {
       // ventanas (m)
-      double rough_window_m = 0.30;
+      double rough_window_m = 0.40;
       double step_window_m  = 0.25;
 
       // límites “robot-aware”

@@ -5,7 +5,7 @@
 
 namespace em::layers {
 
-// ===== ya existentes =====
+
 void addSlope(grid_map::GridMap& map, double h);
 void addRoughness(grid_map::GridMap& map, double window_m);
 void addStep(grid_map::GridMap& map, double window_m);
@@ -21,13 +21,12 @@ void addCvarTraversability(grid_map::GridMap& map,
                            double alpha,
                            double window_m);
 
-// Versión corta (la que ya tenías)
+
 
 void addNegativeObstacles(grid_map::GridMap& map,
                           double drop_thresh_m,
                           double ring_m);
 
-// NUEVA: versión “robusta” con más parámetros y nombre distinto
 void addNegativeObstaclesRobust(grid_map::GridMap& map,
                                 double drop_thresh_m,
                                 double ring_m,
@@ -37,7 +36,7 @@ void addNegativeObstaclesRobust(grid_map::GridMap& map,
                                 const std::string& slope_layer,
                                 const std::string& out_layer);
 
-// Combinar capas en una final
+
 void combineToFinalObstacles(grid_map::GridMap& map,
                              const std::string& obstacles_layer,
                              const std::string& negatives_layer,
