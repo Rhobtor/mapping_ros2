@@ -201,6 +201,10 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+# Export include directories so callers of find_package(kindr) get the include
+# paths (e.g. kindr_INCLUDE_DIRS) when using ament-style packaging.
+# The package installs headers to include/<package_name> so export that path.
+ament_export_include_directories(include/${PROJECT_NAME})
 ament_export_dependencies(Eigen3)
 
 ament_package()
