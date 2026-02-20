@@ -549,7 +549,10 @@ void ElevationMapping::pointCloudCallback(sensor_msgs::msg::PointCloud2::ConstSh
 
   PointCloudType::Ptr pointCloud(new PointCloudType);
   pcl::fromPCLPointCloud2(pcl_pc, *pointCloud);
-  lastPointCloudUpdateTime_ = rclcpp::Time(1000 * pointCloud->header.stamp, RCL_ROS_TIME);
+  // Use the ROS message timestamp for pose lookup. The PCL header stamp can be
+  // in different units depending on conversion path, which breaks matching
+  // pointclouds to odometry in the cache.
+  lastPointCloudUpdateTime_ = rclcpp::Time(pointCloudMsg->header.stamp, RCL_ROS_TIME);
 
   RCLCPP_DEBUG(nodeHandle_->get_logger(), "ElevationMap received a point cloud (%i points) for elevation mapping.", static_cast<int>(pointCloud->size()));
 
